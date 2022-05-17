@@ -7,7 +7,8 @@
   <title>tiffviewer_demo</title>
   <script src="https://d3js.org/d3-color.v2.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/lodash.js/4.17.20/lodash.min.js"></script>
-  <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/geojs/1.4.3/geo.min.js"></script>
+  <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/geojs/1.8.3/geo.min.js"></script>
+  <script type="text/javascript" src="qwebchannel.js"></script>
 </head>
 <body>
 <div class="wrapper">
@@ -82,23 +83,179 @@
   console.log("index imageId : " + imageId);
   tileUrl = `${host}/${baseEndpoint}/${imageId}/tiles/{z}/{x}/{y}.png`;
 
+  var metadata = undefined;
+
+  var Bridge = null;
+  var x = 5;
+  window.onload = function () {
+    new QWebChannel(qt.webChannelTransport,
+      function(channel) {
+        Bridge = channel.objects.Bridge;
+        Bridge.get_bands(111, function (pyval) {
+          var bands = JSON.parse(pyval);
+          for (const [source, values] of Object.entries(bands)) {
+            const interp = values['interpretation']
+            var newOption = document.createElement('option');
+            newOption.value = source;
+            newOption.text = interp ? `${source}: ${interp}` : source;
+            bandDropdown.appendChild(newOption)
+          }
+          if (windowSearchParams['band']) {
+            bandDropdown.value = windowSearchParams['band'] ? windowSearchParams['band'] : '-- none --';
+            colorsSubGroup.style.display = 'block';
+          }
+        });
+
+        Bridge.get_color_maps(function (pyval) {
+          var data = JSON.parse(pyval);
+          for (const [source, indices] of Object.entries(data)) {
+            for (const index in indices) {
+              const option = data[source][index];
+              var newOption = document.createElement('option');
+              newOption.value = option;
+              newOption.text = option;
+              colorsDropdown.appendChild(newOption);
+            }
+          }
+          colorsDropdown.value = windowSearchParams['palette'] ? windowSearchParams['palette'] : '-- none --';
+        });
+
+        Bridge.get_metadata(function (pyval) {
+          var tileinfo = JSON.parse(pyval);
+          if (tileinfo['geospatial']) {
+            updateTileUrlOption('projection', 'EPSG:3857');
+
+            // Initialize the map
+            viewer = geo.map({
+              node: '#imageViewer',
+              clampBoundsX: true
+            })
+            var basemapLayer = viewer.createLayer('osm', {
+              source: 'osm',
+              gcs: 'EPSG:3857' // web mercator
+            });
+
+            function setBounds(extent, setMax = false) {
+              if (extent != undefined && extent.xmin != undefined) {
+                let xc = (extent.xmax - extent.xmin) * 0.2
+                let yc = (extent.ymax - extent.ymin) * 0.2
+                if (xc === 0) {
+                  xc = 0.01
+                }
+                if (yc === 0) {
+                  yc = 0.01
+                }
+                var bounds = {
+                  left: Math.max(extent.xmin - xc, -180.0),
+                  right: Math.min(extent.xmax + xc, 180.0),
+                  top: Math.min(extent.ymax + yc, 89.9999),
+                  bottom: Math.max(extent.ymin - yc, -89.9999)
+                }
+                viewer.bounds(bounds);
+                if (setMax) {
+                  viewer.maxBounds(bounds)
+                } else {
+                  viewer.zoom(viewer.zoom() - 0.25);
+                }
+              }
+            }
+            setBounds(tileinfo.bounds);
+
+            // Tile layer for showing rasters/images with large_image
+            imageLayer = viewer.createLayer('osm', {
+              keepLower: false,
+              attribution: '',
+              autoshareRenderer: false,
+            });
+
+            const dataset_bb = tileinfo.bounds;
+            imageLayer.isValid = (index) => {
+              const tileBounds = imageLayer.gcsTileBounds(index);
+              return tileBounds.left <= dataset_bb.xmax &&
+                tileBounds.right >= dataset_bb.xmin &&
+                tileBounds.top >= dataset_bb.ymin &&
+                tileBounds.bottom <= dataset_bb.ymax;
+            }
+            imageLayer.idleAfter = 'all';
+
+            // Increase zoom range from default of 16
+            viewer.zoomRange({
+              min: 0,
+              max: 20,
+            })
+          } else {
+            const params = geo.util.pixelCoordinateParams(
+              '#imageViewer', tileinfo.sizeX, tileinfo.sizeY, tileinfo.tileWidth, tileinfo.tileHeight);
+            params.layer.url = tileUrl;
+
+            viewer = geo.map(params.map);
+
+            viewer.zoomRange({
+              // do not set a min limit so that bounds clamping determines min
+              min: -Infinity,
+              max: 12,
+            });
+
+            imageLayer = viewer.createLayer('osm', params.layer);
+          }
+          // Change default interactor options
+          const interactorOpts = viewer.interactor().options();
+          interactorOpts.zoomAnimation = {
+            enabled: false,
+          };
+          interactorOpts.momentum = {
+            enabled: true,
+          };
+          viewer.interactor().options(interactorOpts);
+
+
+          var ui = viewer.createLayer('ui');
+          // Create a zoom slider widget
+          ui.createWidget('slider', {
+            position: {
+              left: 40,
+              top: 40
+            }
+          });
+          bandChange();
+        });
+
+        Bridge.get_thumbnail(function(thumbnail) {
+          // console.log("thumbnail return by get_thumbnail", thumbnail);
+          if (thumbnail) {
+            $('#thumbnail').attr('src', "data:image/png;base64,"+thumbnail);
+          }
+        });
+
+        Bridge.getRef(x, function(pyval) {
+          Bridge.printRef(pyval);
+        });
+
+        Bridge.get_metadata(function (pyval) {
+          metadata = JSON.parse(pyval);
+        });
+      }
+    );
+  };
+
   function updateTileUrlOption(option, value) {
-    if (thumbnailUrl === undefined) {
-      thumbnailUrl = `${host}/${baseEndpoint}/${imageId}/thumbnail.png`;
-    }
+    // if (thumbnailUrl === undefined) {
+    //   thumbnailUrl = `${host}/${baseEndpoint}/${imageId}/thumbnail.png`;
+    // }
     const url = new URL(tileUrl);
-    const urlThumb = new URL(thumbnailUrl);
+    // const urlThumb = new URL(thumbnailUrl);
     if (value === undefined) {
       url.searchParams.delete(option);
-      urlThumb.searchParams.delete(option);
+      // urlThumb.searchParams.delete(option);
     } else {
       url.searchParams.set(option, value);
-      urlThumb.searchParams.set(option, value);
+      // urlThumb.searchParams.set(option, value);
     }
     const tileFormatEncoded = '/%7Bz%7D/%7Bx%7D/%7By%7D.';
     const tileFormat = '/{z}/{x}/{y}.';
     tileUrl = url.toString().replace(tileFormatEncoded, tileFormat);
-    thumbnailUrl = urlThumb.toString();
+    console.log("tileUrl return by updateTileUrlOption", tileUrl);
+    // thumbnailUrl = urlThumb.toString();
     // insertWindowUrlParam(option, value);
   }
 
@@ -122,37 +279,52 @@
     uiContent.style.display = 'none';
   }
 
-  fetch(`${host}/${baseEndpoint}/${imageId}/bands`).then(response => {
-    response.json().then(data => {
-      bands = data;
-      for (const [source, values] of Object.entries(bands)) {
-        const interp = values['interpretation']
-        var newOption = document.createElement('option');
-        newOption.value = source;
-        newOption.text = interp ? `${source}: ${interp}` : source;
-        bandDropdown.appendChild(newOption)
-      }
-      if (windowSearchParams['band']) {
-        bandDropdown.value = windowSearchParams['band'] ? windowSearchParams['band'] : '-- none --';
-        colorsSubGroup.style.display = 'block';
-      }
-    });
-  })
+  // fetch(`${host}/${baseEndpoint}/${imageId}/bands`).then(response => {
+  //   response.json().then(data => {
+  //     bands = data;
+  //     for (const [source, values] of Object.entries(bands)) {
+  //       const interp = values['interpretation']
+  //       var newOption = document.createElement('option');
+  //       newOption.value = source;
+  //       newOption.text = interp ? `${source}: ${interp}` : source;
+  //       bandDropdown.appendChild(newOption)
+  //     }
+  //     if (windowSearchParams['band']) {
+  //       bandDropdown.value = windowSearchParams['band'] ? windowSearchParams['band'] : '-- none --';
+  //       colorsSubGroup.style.display = 'block';
+  //     }
+  //   });
+  // })
 
-  fetch(`${host}/${baseApi}/large-image/colormaps`)
-    .then(response => response.json())
-    .then(data => {
-      for (const [source, indices] of Object.entries(data)) {
-        for (const index in indices) {
-          const option = data[source][index];
-          var newOption = document.createElement('option');
-          newOption.value = option;
-          newOption.text = option;
-          colorsDropdown.appendChild(newOption);
-        }
-      }
-      colorsDropdown.value = windowSearchParams['palette'] ? windowSearchParams['palette'] : '-- none --';
-    });
+  // Bridge.get_bands(111, function (pyval) {
+  //     bands = pyval;
+  //     for (const [source, values] of Object.entries(bands)) {
+  //       const interp = values['interpretation']
+  //       var newOption = document.createElement('option');
+  //       newOption.value = source;
+  //       newOption.text = interp ? `${source}: ${interp}` : source;
+  //       bandDropdown.appendChild(newOption)
+  //     }
+  //     if (windowSearchParams['band']) {
+  //       bandDropdown.value = windowSearchParams['band'] ? windowSearchParams['band'] : '-- none --';
+  //       colorsSubGroup.style.display = 'block';
+  //     }
+  //   });
+
+  // fetch(`${host}/${baseApi}/large-image/colormaps`)
+  //   .then(response => response.json())
+  //   .then(data => {
+  //     for (const [source, indices] of Object.entries(data)) {
+  //       for (const index in indices) {
+  //         const option = data[source][index];
+  //         var newOption = document.createElement('option');
+  //         newOption.value = option;
+  //         newOption.text = option;
+  //         colorsDropdown.appendChild(newOption);
+  //       }
+  //     }
+  //     colorsDropdown.value = windowSearchParams['palette'] ? windowSearchParams['palette'] : '-- none --';
+  //   });
 
   function changeColors() {
     colorsSubGroup.display = 'block';
@@ -188,12 +360,15 @@
     }
   }
 
-  var metadata = undefined;
-  fetch(`${host}/${baseEndpoint}/${imageId}/metadata`)
-    .then(response => response.json())
-    .then(data => {
-      metadata = data
-    });
+
+  // fetch(`${host}/${baseEndpoint}/${imageId}/metadata`)
+  //   .then(response => response.json())
+  //   .then(data => {
+  //     metadata = data
+  //   });
+  // Bridge.get_metadata(function (pyval) {
+  //   metadata = JSON.parse(pyval);
+  // });
 
   async function copyMetadata() {
     var copyText = JSON.stringify(metadata);
@@ -205,108 +380,109 @@
   var imageLayer;
   var viewer;
 
-  fetch(`${host}/${baseEndpoint}/${imageId}/metadata`)
-  .then(response => response.json())
-  .then(tileinfo => {
-    if (tileinfo['geospatial']) {
-      updateTileUrlOption('projection', 'EPSG:3857');
-
-      // Initialize the map
-      viewer = geo.map({
-        node: '#imageViewer',
-        clampBoundsX: true
-      })
-      var basemapLayer = viewer.createLayer('osm', {
-        source: 'osm',
-        gcs: 'EPSG:3857' // web mercator
-      });
-
-      function setBounds(extent, setMax = false) {
-        if (extent != undefined && extent.xmin != undefined) {
-          let xc = (extent.xmax - extent.xmin) * 0.2
-          let yc = (extent.ymax - extent.ymin) * 0.2
-          if (xc === 0) {
-            xc = 0.01
-          }
-          if (yc === 0) {
-            yc = 0.01
-          }
-          var bounds = {
-            left: Math.max(extent.xmin - xc, -180.0),
-            right: Math.min(extent.xmax + xc, 180.0),
-            top: Math.min(extent.ymax + yc, 89.9999),
-            bottom: Math.max(extent.ymin - yc, -89.9999)
-          }
-          viewer.bounds(bounds);
-          if (setMax) {
-            viewer.maxBounds(bounds)
-          } else {
-            viewer.zoom(viewer.zoom() - 0.25);
-          }
-        }
-      }
-      setBounds(tileinfo.bounds);
-
-      // Tile layer for showing rasters/images with large_image
-      imageLayer = viewer.createLayer('osm', {
-        keepLower: false,
-        attribution: '',
-        autoshareRenderer: false,
-      });
-
-      const dataset_bb = tileinfo.bounds;
-      imageLayer.isValid = (index) => {
-        const tileBounds = imageLayer.gcsTileBounds(index);
-        return tileBounds.left <= dataset_bb.xmax &&
-          tileBounds.right >= dataset_bb.xmin &&
-          tileBounds.top >= dataset_bb.ymin &&
-          tileBounds.bottom <= dataset_bb.ymax;
-      }
-      imageLayer.idleAfter = 'all';
-
-      // Increase zoom range from default of 16
-      viewer.zoomRange({
-        min: 0,
-        max: 20,
-      })
-    } else {
-      const params = geo.util.pixelCoordinateParams(
-        '#imageViewer', tileinfo.sizeX, tileinfo.sizeY, tileinfo.tileWidth, tileinfo.tileHeight);
-      params.layer.url = tileUrl;
-
-      viewer = geo.map(params.map);
-
-      viewer.zoomRange({
-        // do not set a min limit so that bounds clamping determines min
-        min: -Infinity,
-        max: 12,
-      });
-
-      imageLayer = viewer.createLayer('osm', params.layer);
-    }
-    // Change default interactor options
-    const interactorOpts = viewer.interactor().options();
-    interactorOpts.zoomAnimation = {
-      enabled: false,
-    };
-    interactorOpts.momentum = {
-      enabled: true,
-    };
-    viewer.interactor().options(interactorOpts);
-
-
-    var ui = viewer.createLayer('ui');
-    // Create a zoom slider widget
-    ui.createWidget('slider', {
-      position: {
-        left: 40,
-        top: 40
-      }
-    });
-    bandChange();
-  });
+  // fetch(`${host}/${baseEndpoint}/${imageId}/metadata`)
+  // .then(response => response.json())
+  // .then(tileinfo => {
+  //   if (tileinfo['geospatial']) {
+  //     updateTileUrlOption('projection', 'EPSG:3857');
+  //
+  //     // Initialize the map
+  //     viewer = geo.map({
+  //       node: '#imageViewer',
+  //       clampBoundsX: true
+  //     })
+  //     var basemapLayer = viewer.createLayer('osm', {
+  //       source: 'osm',
+  //       gcs: 'EPSG:3857' // web mercator
+  //     });
+  //
+  //     function setBounds(extent, setMax = false) {
+  //       if (extent != undefined && extent.xmin != undefined) {
+  //         let xc = (extent.xmax - extent.xmin) * 0.2
+  //         let yc = (extent.ymax - extent.ymin) * 0.2
+  //         if (xc === 0) {
+  //           xc = 0.01
+  //         }
+  //         if (yc === 0) {
+  //           yc = 0.01
+  //         }
+  //         var bounds = {
+  //           left: Math.max(extent.xmin - xc, -180.0),
+  //           right: Math.min(extent.xmax + xc, 180.0),
+  //           top: Math.min(extent.ymax + yc, 89.9999),
+  //           bottom: Math.max(extent.ymin - yc, -89.9999)
+  //         }
+  //         viewer.bounds(bounds);
+  //         if (setMax) {
+  //           viewer.maxBounds(bounds)
+  //         } else {
+  //           viewer.zoom(viewer.zoom() - 0.25);
+  //         }
+  //       }
+  //     }
+  //     setBounds(tileinfo.bounds);
+  //
+  //     // Tile layer for showing rasters/images with large_image
+  //     imageLayer = viewer.createLayer('osm', {
+  //       keepLower: false,
+  //       attribution: '',
+  //       autoshareRenderer: false,
+  //     });
+  //
+  //     const dataset_bb = tileinfo.bounds;
+  //     imageLayer.isValid = (index) => {
+  //       const tileBounds = imageLayer.gcsTileBounds(index);
+  //       return tileBounds.left <= dataset_bb.xmax &&
+  //         tileBounds.right >= dataset_bb.xmin &&
+  //         tileBounds.top >= dataset_bb.ymin &&
+  //         tileBounds.bottom <= dataset_bb.ymax;
+  //     }
+  //     imageLayer.idleAfter = 'all';
+  //
+  //     // Increase zoom range from default of 16
+  //     viewer.zoomRange({
+  //       min: 0,
+  //       max: 20,
+  //     })
+  //   } else {
+  //     const params = geo.util.pixelCoordinateParams(
+  //       '#imageViewer', tileinfo.sizeX, tileinfo.sizeY, tileinfo.tileWidth, tileinfo.tileHeight);
+  //     params.layer.url = tileUrl;
+  //
+  //     viewer = geo.map(params.map);
+  //
+  //     viewer.zoomRange({
+  //       // do not set a min limit so that bounds clamping determines min
+  //       min: -Infinity,
+  //       max: 12,
+  //     });
+  //
+  //     imageLayer = viewer.createLayer('osm', params.layer);
+  //   }
+  //   // Change default interactor options
+  //   const interactorOpts = viewer.interactor().options();
+  //   interactorOpts.zoomAnimation = {
+  //     enabled: false,
+  //   };
+  //   interactorOpts.momentum = {
+  //     enabled: true,
+  //   };
+  //   viewer.interactor().options(interactorOpts);
+  //
+  //
+  //   var ui = viewer.createLayer('ui');
+  //   // Create a zoom slider widget
+  //   ui.createWidget('slider', {
+  //     position: {
+  //       left: 40,
+  //       top: 40
+  //     }
+  //   });
+  //   bandChange();
+  // });
 
   function updateTileLayer() {
+    console.log("into updateTileLayer", tileUrl);
     imageLayer.url(tileUrl);
   }
 
