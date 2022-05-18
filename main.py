@@ -115,6 +115,14 @@ class Bridge(QObject):
         # print("get_thumbnail thumb_data before return", type(buf), buf.size())
         return QByteArray(thumb_data).toBase64()
 
+    @pyqtSlot(int, int, int, result=QByteArray)
+    def get_tile(self, x, y, z):
+        print("into get_tiles", x, y, z)
+        tile_data = source.getTile(x, y, z)
+        res = QByteArray(tile_data).toBase64()
+
+        return res
+
     @QtCore.pyqtSlot(int, result=int)
     def getRef(self, x):
         print("inside getRef", x)
@@ -148,7 +156,7 @@ class FormWidget(QWidget):
         self.browser = QWebEngineView()
         # self.browser.setPage(WebEnginePage(self.browser))
         self.browser.page().profile().defaultProfile().setRequestInterceptor(RequestInterceptor(self))
-        self.browser.page().profile().defaultProfile().installUrlSchemeHandler(b'api', UrlSchemeHandler(self.browser))
+        self.browser.page().profile().defaultProfile().installUrlSchemeHandler(b'', UrlSchemeHandler(self.browser))
         self.channel = QWebChannel(self.browser.page())
 
         self.browser.page().setWebChannel(self.channel)

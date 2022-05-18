@@ -60,6 +60,7 @@
   var host = undefined;
   var thumbnailUrl = undefined;
   var tileUrl = undefined;
+  var tile_data = undefined;
   var baseApi = 'api';
 
   const windowSearch = new URLSearchParams(window.location.search);
@@ -107,7 +108,7 @@
         });
 
         Bridge.get_color_maps(function (pyval) {
-          var data = JSON.parse(pyval);
+          let data = JSON.parse(pyval);
           for (const [source, indices] of Object.entries(data)) {
             for (const index in indices) {
               const option = data[source][index];
@@ -119,6 +120,38 @@
           }
           colorsDropdown.value = windowSearchParams['palette'] ? windowSearchParams['palette'] : '-- none --';
         });
+
+        tileUrl = async function (x, y, z, subdomains) {
+          console.log("input x,y,z,subdomains in index.html", x, y, z, subdomains);
+
+          let promise = new Promise(function (resolve, reject) {
+            Bridge.get_tile(x, y, z, function (pyval) {
+              tile_data = "data:image/png;base64," + pyval;
+              // console.log("tile_data in index.html", tile_data);
+              resolve(tile_data);
+            });
+          });
+
+          // return promise.then(function (value) {
+          //   console.log("tile_data in index.html promise then", value);
+          //   return value;
+          // });
+          let res = await promise;
+          console.log("res return by promise", res);
+          return res;
+        };
+
+        // tileUrl = function (x, y, z, subdomains) {
+        //   console.log("input x,y,z,subdomains in index.html", x, y, z, subdomains);
+        //
+        //   Bridge.get_tile(x, y, z, function (pyval) {
+        //     tile_data = "data:image/png;base64," + pyval;
+        //     console.log("tile_data return by get_tile", tile_data);
+        //   });
+        //
+        //   console.log("tile_data before return in tileUrl", tile_data);
+        //   return tile_data;
+        // }
 
         Bridge.get_metadata(function (pyval) {
           var tileinfo = JSON.parse(pyval);
@@ -242,18 +275,18 @@
     // if (thumbnailUrl === undefined) {
     //   thumbnailUrl = `${host}/${baseEndpoint}/${imageId}/thumbnail.png`;
     // }
-    const url = new URL(tileUrl);
-    // const urlThumb = new URL(thumbnailUrl);
-    if (value === undefined) {
-      url.searchParams.delete(option);
-      // urlThumb.searchParams.delete(option);
-    } else {
-      url.searchParams.set(option, value);
-      // urlThumb.searchParams.set(option, value);
-    }
-    const tileFormatEncoded = '/%7Bz%7D/%7Bx%7D/%7By%7D.';
-    const tileFormat = '/{z}/{x}/{y}.';
-    tileUrl = url.toString().replace(tileFormatEncoded, tileFormat);
+    // const url = new URL(tileUrl);
+    // // const urlThumb = new URL(thumbnailUrl);
+    // if (value === undefined) {
+    //   url.searchParams.delete(option);
+    //   // urlThumb.searchParams.delete(option);
+    // } else {
+    //   url.searchParams.set(option, value);
+    //   // urlThumb.searchParams.set(option, value);
+    // }
+    // const tileFormatEncoded = '/%7Bz%7D/%7Bx%7D/%7By%7D.';
+    // const tileFormat = '/{z}/{x}/{y}.';
+    // tileUrl = url.toString().replace(tileFormatEncoded, tileFormat);
     console.log("tileUrl return by updateTileUrlOption", tileUrl);
     // thumbnailUrl = urlThumb.toString();
     // insertWindowUrlParam(option, value);
