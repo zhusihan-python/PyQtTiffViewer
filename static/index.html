@@ -7,56 +7,44 @@
   <title>tiffviewer_demo</title>
   <script src="https://d3js.org/d3-color.v2.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/lodash.js/4.17.20/lodash.min.js"></script>
-  <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/geojs/1.8.3/geo.min.js"></script>
+<!--  <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/geojs/1.8.3/geo.min.js"></script>-->
+  <script type="text/javascript" src="geo.min.js"></script>
   <script type="text/javascript" src="qwebchannel.js"></script>
 </head>
 <body>
 <div class="wrapper">
   <div id="imageViewer" style="width: 100%; height: 100%; z-index: 10;"></div>
   <div class="slidecontainer">
-  <button type="button" class="collapsible" id="displayControlsToggle">Toggle Controls</button>
-  <div id="displayControls">
-    <label for="rasterOpacityRange">Raster Layer Opacity: </label>
-    <input type="range" min="1" max="100" value="100" class="overlay" id="rasterOpacityRange" onChange="updateTilesOpacity(event, value)" onInput="updateTilesOpacity(event, value)" style="top: 5px; left: 5px;">
-    <br />
-    <label for="bandChoice">Choose a band:</label>
-    <select id="bandChoice" onChange='bandChange();'>
-      <option>-- none --</option>
-    </select>
-    <br />
-    <div id='colorsSubGroup' style="display: none;">
-      <label for="colors">Choose a colormap:</label>
-      <select id="colors" onChange='changeColors();'>
+    <button type="button" class="collapsible" id="displayControlsToggle">Toggle Controls</button>
+    <div id="displayControls">
+      <label for="rasterOpacityRange">Raster Layer Opacity: </label>
+      <input type="range" min="1" max="100" value="100" class="overlay" id="rasterOpacityRange" onChange="updateTilesOpacity(event, value)" onInput="updateTilesOpacity(event, value)" style="top: 5px; left: 5px;">
+      <br />
+      <label for="bandChoice">Choose a band:</label>
+      <select id="bandChoice" onChange='bandChange();'>
         <option>-- none --</option>
       </select>
       <br />
-      <input id="mincolor" type="number" step="0.01" onChange='changeColors();'>
-      <input id="maxcolor" type="number" step="0.01" onChange='changeColors();'>
-    </div>
-    <div>
-    <img id="thumbnail" />
-    </div>
-    <div id="metadataViewer">
-      <button type="button" id="copyMetadataButton" onclick="copyMetadata();">Copy Metadata</button>
-    </div>
+      <div id='colorsSubGroup' style="display: none;">
+        <label for="colors">Choose a colormap:</label>
+        <select id="colors" onChange='changeColors();'>
+          <option>-- none --</option>
+        </select>
+        <br />
+        <input id="mincolor" type="number" step="0.01" onChange='changeColors();'>
+        <input id="maxcolor" type="number" step="0.01" onChange='changeColors();'>
+      </div>
+      <div>
+      <img id="thumbnail" />
+      </div>
+      <div id="metadataViewer">
+        <button type="button" id="copyMetadataButton" onclick="copyMetadata();">Copy Metadata</button>
+      </div>
     </div>
   </div>
 </div>
 </body>
 <script>
-  var baseEndpoint = 'api/imagefile';
-  const displayControlsToggle = document.getElementById('displayControlsToggle');
-  const displayControls = document.getElementById('displayControls');
-  addToggleListener(displayControlsToggle, displayControls);
-
-  var colorsSubGroup = document.getElementById('colorsSubGroup');
-  var colorsDropdown = document.getElementById('colors');
-  var bandDropdown = document.getElementById('bandChoice');
-  var colorsMin = document.getElementById('mincolor');
-  var colorsMax = document.getElementById('maxcolor');
-  var thumbnail = document.getElementById('thumbnail');
-  var bands;
-
   var host = undefined;
   var thumbnailUrl = undefined;
   var tileUrl = undefined;
@@ -75,6 +63,19 @@
     colorsMax.value = windowSearchParams['max']
   }
 
+  var baseEndpoint = 'api/imagefile';
+  const displayControlsToggle = document.getElementById('displayControlsToggle');
+  const displayControls = document.getElementById('displayControls');
+  addToggleListener(displayControlsToggle, displayControls);
+
+  var colorsSubGroup = document.getElementById('colorsSubGroup');
+  var colorsDropdown = document.getElementById('colors');
+  var bandDropdown = document.getElementById('bandChoice');
+  var colorsMin = document.getElementById('mincolor');
+  var colorsMax = document.getElementById('maxcolor');
+  var thumbnail = document.getElementById('thumbnail');
+  var bands;
+
   var imageId = 1;
   if (host === undefined) {
     host = window.location.protocol + "//" + window.location.host;
@@ -85,6 +86,9 @@
   tileUrl = `${host}/${baseEndpoint}/${imageId}/tiles/{z}/{x}/{y}.png`;
 
   var metadata = undefined;
+  const containerRef = document.getElementById('imageViewer')
+  var imageLayer;
+  var viewer;
 
   var Bridge = null;
   var x = 5;
@@ -109,52 +113,70 @@
 
         Bridge.get_color_maps(function (pyval) {
           let data = JSON.parse(pyval);
-          for (const [source, indices] of Object.entries(data)) {
-            for (const index in indices) {
-              const option = data[source][index];
+          if ( data !== undefined ) {
+            for (const [source, values] of Object.entries(data)) {
+              const interp = values['interpretation']
               var newOption = document.createElement('option');
-              newOption.value = option;
-              newOption.text = option;
-              colorsDropdown.appendChild(newOption);
+              newOption.value = source;
+              newOption.text = interp ? `${source}: ${interp}` : source;
+              colorsDropdown.appendChild(newOption)
+            }
+            if (windowSearchParams['colors']) {
+              colorsDropdown.value = windowSearchParams['colors'] ? windowSearchParams['colors'] : '-- none --';
+              colorsSubGroup.style.display = 'block';
             }
           }
-          colorsDropdown.value = windowSearchParams['palette'] ? windowSearchParams['palette'] : '-- none --';
+          // for (const [source, indices] of Object.entries(data)) {
+          //   for (const index in indices) {
+          //     const option = data[source][index];
+          //     var newOption = document.createElement('option');
+          //     newOption.value = option;
+          //     newOption.text = option;
+          //     colorsDropdown.appendChild(newOption);
+          //   }
+          // }
+          // colorsDropdown.value = windowSearchParams['palette'] ? windowSearchParams['palette'] : '-- none --';
         });
 
-        tileUrl = async function (x, y, z, subdomains) {
-          console.log("input x,y,z,subdomains in index.html", x, y, z, subdomains);
-
-          let promise = new Promise(function (resolve, reject) {
-            Bridge.get_tile(x, y, z, function (pyval) {
-              tile_data = "data:image/png;base64," + pyval;
-              // console.log("tile_data in index.html", tile_data);
-              resolve(tile_data);
-            });
-          });
-
-          // return promise.then(function (value) {
-          //   console.log("tile_data in index.html promise then", value);
-          //   return value;
-          // });
-          let res = await promise;
-          console.log("res return by promise", res);
-          return res;
-        };
+        // tileUrl = async function (x, y, z, subdomains) {
+        //   console.log("input x,y,z,subdomains in index.html", x, y, z, subdomains);
+        //
+        //   let promise = new Promise(function (resolve, reject) {
+        //     Bridge.get_tile(x, y, z, function (pyval) {
+        //       tile_data = "data:image/png;base64," + pyval;
+        //       // console.log("tile_data in index.html", tile_data);
+        //       resolve(tile_data);
+        //     });
+        //   });
+        //
+        //   // return promise.then(function (value) {
+        //   //   console.log("tile_data in index.html promise then", value);
+        //   //   return value;
+        //   // });
+        //   // let res = await promise;
+        //   // console.log("res return by promise", res);
+        //   // return res;
+        //   return await promise;
+        // };
 
         // tileUrl = function (x, y, z, subdomains) {
         //   console.log("input x,y,z,subdomains in index.html", x, y, z, subdomains);
+        //   let finished = false;
         //
         //   Bridge.get_tile(x, y, z, function (pyval) {
         //     tile_data = "data:image/png;base64," + pyval;
         //     console.log("tile_data return by get_tile", tile_data);
+        //     updateTileLayer(tile_data);
         //   });
         //
-        //   console.log("tile_data before return in tileUrl", tile_data);
-        //   return tile_data;
+        //   // console.log("tile_data before return in tileUrl", tile_data);
+        //   // return tile_data;
         // }
 
         Bridge.get_metadata(function (pyval) {
+          console.log("into get_metadata", pyval);
           var tileinfo = JSON.parse(pyval);
+          console.log("into get_metadata tileinfo: ", tileinfo['geospatial']);
           if (tileinfo['geospatial']) {
             updateTileUrlOption('projection', 'EPSG:3857');
 
@@ -169,6 +191,7 @@
             });
 
             function setBounds(extent, setMax = false) {
+              console.log("into setBounds");
               if (extent != undefined && extent.xmin != undefined) {
                 let xc = (extent.xmax - extent.xmin) * 0.2
                 let yc = (extent.ymax - extent.ymin) * 0.2
@@ -201,6 +224,8 @@
               autoshareRenderer: false,
             });
 
+            console.log("imageLayer in get_metadata if", imageLayer);
+
             const dataset_bb = tileinfo.bounds;
             imageLayer.isValid = (index) => {
               const tileBounds = imageLayer.gcsTileBounds(index);
@@ -217,10 +242,11 @@
               max: 20,
             })
           } else {
+            console.log("into get_metadata else");
             const params = geo.util.pixelCoordinateParams(
               '#imageViewer', tileinfo.sizeX, tileinfo.sizeY, tileinfo.tileWidth, tileinfo.tileHeight);
             params.layer.url = tileUrl;
-
+            console.log("get_metadata else params layer", params.layer);
             viewer = geo.map(params.map);
 
             viewer.zoomRange({
@@ -228,8 +254,15 @@
               min: -Infinity,
               max: 12,
             });
+            console.log("get_metadata else viewer", viewer);
+            try {
+              imageLayer = viewer.createLayer('osm', params.layer);
+            }
+            catch (err) {
+              console.log("createLayer get err", err)
+            }
 
-            imageLayer = viewer.createLayer('osm', params.layer);
+            console.log("imageLayer in get_metadata else", imageLayer);
           }
           // Change default interactor options
           const interactorOpts = viewer.interactor().options();
@@ -259,6 +292,27 @@
             $('#thumbnail').attr('src', "data:image/png;base64,"+thumbnail);
           }
         });
+
+        // function updateTileLayerInner() {
+        //   console.log("into updateTileLayerInner", tile_data);
+        //   // imageLayer.url(tile_data);
+        // }
+
+        tileUrl = function (x, y, z, subdomains) {
+          console.log("input x,y,z,subdomains in index.html", x, y, z, subdomains);
+
+          Bridge.get_tile(x, y, z, function (pyval) {
+            tile_data = "data:image/png;base64," + pyval;
+            console.log("tile_data return by get_tile", tile_data);
+            console.log("viewer", viewer);
+            console.log("imageLayer", imageLayer);
+            imageLayer.url(tile_data);
+            // updateTileLayerInner();
+          });
+
+          // console.log("tile_data before return in tileUrl", tile_data);
+          // return tile_data;
+        }
 
         Bridge.getRef(x, function(pyval) {
           Bridge.printRef(pyval);
@@ -409,9 +463,9 @@
     alert("Copied image metadata");
   }
 
-  const containerRef = document.getElementById('imageViewer')
-  var imageLayer;
-  var viewer;
+  // const containerRef = document.getElementById('imageViewer')
+  // var imageLayer;
+  // var viewer;
 
   // fetch(`${host}/${baseEndpoint}/${imageId}/metadata`)
   // .then(response => response.json())
@@ -515,8 +569,8 @@
   // });
 
   function updateTileLayer() {
-    console.log("into updateTileLayer", tileUrl);
-    imageLayer.url(tileUrl);
+    console.log("into updateTileLayer", tile_data);
+    imageLayer.url(tile_data);
   }
 
   function updateTilesOpacity(e, value) {
