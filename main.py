@@ -5,9 +5,10 @@ import json
 from django.http import HttpResponse
 
 from PyQt5.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QWidget, QHBoxLayout, QSizePolicy
-from PyQt5.QtWebEngineCore import QWebEngineUrlRequestInterceptor, QWebEngineUrlSchemeHandler
+from PyQt5.QtWebEngineCore import QWebEngineUrlRequestInterceptor, QWebEngineUrlSchemeHandler, QWebEngineUrlScheme
 from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEnginePage, QWebEngineProfile, QWebEngineSettings
 from PyQt5.QtWebChannel import QWebChannel
+from PyQt5.QtNetwork import QNetworkAccessManager, QNetworkRequest
 from PyQt5.QtCore import pyqtSlot, QEvent, QObject, QByteArray, QBuffer, QIODevice
 from PyQt5 import QtGui
 from PyQt5 import QtCore
@@ -21,27 +22,44 @@ BASE_DIR = os.path.dirname(__file__)
 class RequestInterceptor(QWebEngineUrlRequestInterceptor):
 
     def interceptRequest(self, info):
-        url = info.requestUrl().toString()
-        print("interceptRequest:", url, info.requestMethod())
-        if url.endswith("thumbnail.png"):
-            print("interceptRequest get thumbnail.png:", url, info.navigationType())
+        # url = info.requestUrl().toString()
+        url = info.requestUrl()
+        url_str = url.toString()
+        print("interceptRequest:", url, info, url.scheme(), url_str)
+        # if url.scheme() == 'file' and url_str.endswith("png"):
+        #     # 重定向
+        #     url.setScheme('data')
+        #     info.redirect(url)
+        #     print("interceptRequest get data request")
+        # if url.endswith("thumbnail.png"):
+        #     print("interceptRequest get thumbnail.png:", url, info.navigationType())
 
 
 class UrlSchemeHandler(QWebEngineUrlSchemeHandler):
+    AttrType = QNetworkRequest.User + 1
+
+    def __init__(self, parent):
+        super(UrlSchemeHandler, self).__init__(parent)
+        self._manager = QNetworkAccessManager(self)
+        self._manager.finished.connect(self.onFinished)
 
     def requestStarted(self, job):
         url = job.requestUrl().toString()
         print("requestStarted in UrlSchemeHandler", url)
-        if url.endswith("thumbnail.png"):
-            # file = QFile('Data/app.png', job)
-            # file.open(QIODevice.ReadOnly)
-            # job.reply(b'image/png', file)
-            print("requestStarted get thumbnail.png:", url)
+
+    def onFinished(self, reply):
+        req = reply.request()
+        o_req = req.attribute(self.AttrType, None)
+        print("onFinished in UrlSchemeHandler", o_req)
 
 
 class WebEnginePage(QWebEnginePage):
-    def javaScriptConsoleMessage(self, level, message, lineNumber, sourceID):
-        print("javaScriptConsoleMessage: ", level, message, lineNumber, sourceID)
+    # def javaScriptConsoleMessage(self, level, message, lineNumber, sourceID):
+    #     print("javaScriptConsoleMessage: ", level, message, lineNumber, sourceID)
+
+    def acceptNavigationRequest(self, url, _type, isMainFrame):
+        print("url _type", url, _type)
+        return super().acceptNavigationRequest(url, _type, isMainFrame)
 
 
 class MainWindow(QMainWindow):
@@ -154,9 +172,18 @@ class FormWidget(QWidget):
         html_path = BASE_DIR + r"/static/index.html"
         html = open(html_path, 'r', encoding='UTF-8').read()
         self.browser = QWebEngineView()
-        # self.browser.setPage(WebEnginePage(self.browser))
-        self.browser.page().profile().defaultProfile().setRequestInterceptor(RequestInterceptor(self))
-        self.browser.page().profile().defaultProfile().installUrlSchemeHandler(b'', UrlSchemeHandler(self.browser))
+        self.browser.setPage(WebEnginePage(self.browser))
+        o_file = QWebEngineUrlScheme.schemeByName(QByteArray(b'file'))
+        CorsEnabled = 0x80  # 5.14才增加
+        o_file.setFlags(o_file.flags() |
+                        QWebEngineUrlScheme.SecureScheme |
+                        QWebEngineUrlScheme.LocalScheme |
+                        QWebEngineUrlScheme.LocalAccessAllowed |
+                        CorsEnabled)
+        self.interceptor = RequestInterceptor(self.browser)
+        self.browser.page().profile().defaultProfile().setRequestInterceptor(self.interceptor)
+        # self.handler = UrlSchemeHandler(self.browser)
+        # self.browser.page().profile().defaultProfile().installUrlSchemeHandler(b'data', self.handler)
         self.channel = QWebChannel(self.browser.page())
 
         self.browser.page().setWebChannel(self.channel)
@@ -218,7 +245,7 @@ class FormWidget(QWidget):
 
 
 def main():
-    os.environ["QTWEBENGINE_REMOTE_DEBUGGING"] = "8888"
+    os.environ["QTWEBENGINE_REMOTE_DEBUGGING"] = "9999"
     app = QApplication(sys.argv)
 
     form_widget = FormWidget()
@@ -228,7 +255,7 @@ def main():
 
     dw = QWebEngineView()
     dw.setWindowTitle('devtools')
-    dw.load(QtCore.QUrl('http://127.0.0.1:8888'))
+    dw.load(QtCore.QUrl('http://127.0.0.1:9999'))
     dw.move(600, 100)
     dw.show()
 
