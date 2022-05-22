@@ -224,8 +224,8 @@ class FormWidget(QWidget):
         self.setLayout(self.hBox)
 
     def ready(self, returnValue):
-        print(returnValue)
-        self.browser.page().runJavaScript("viewer.setFullPage(!0);")
+        print("returnValue", returnValue)
+        # self.browser.page().runJavaScript("viewer.setFullPage(!0);")
 
     def handle_fullscreen_requested(self, request, browser):
         request.accept()
@@ -233,15 +233,13 @@ class FormWidget(QWidget):
         if request.toggleOn():
             self.showMaximized()
 
-    def changeEvent(self, e):
-        # print("e in changeEvent", e.type())
-        # print("window state in changeEvent", int(self.windowState()))
-        if e.type() == QEvent.WindowStateChange:
-            self.browser.page().runJavaScript("viewer.fullPageButton.onRelease()", self.ready)
-            # if self.windowState() == Qt.WindowMaximized or self.windowState() == Qt.WindowFullScreen:
-            #     self.showMaximized()
-                # self.browser.page().runJavaScript("viewer.setFullPage(!0);")
-        super().changeEvent(e)
+    # def changeEvent(self, e):
+    #     # print("e in changeEvent", e.type())
+    #     # print("window state in changeEvent", int(self.windowState()))
+    #     if e.type() == QEvent.WindowStateChange:
+    #         self.browser.page().runJavaScript("viewer.fullPageButton.onRelease()", self.ready)
+    #
+    #     super().changeEvent(e)
 
 
 def main():
@@ -249,7 +247,7 @@ def main():
     app = QApplication(sys.argv)
 
     form_widget = FormWidget()
-    form_widget.setMinimumSize(1200, 1000)
+    form_widget.setMinimumSize(500, 500)
     # form_widget.reload("""'E:/projects/NeatSvtScan/data/20220301_28/target/target_files/',""")
     form_widget.show()
 
