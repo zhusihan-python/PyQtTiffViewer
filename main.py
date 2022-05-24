@@ -169,7 +169,8 @@ class FormWidget(QWidget):
         # self.__layout()
 
     def __controls(self):
-        html_path = BASE_DIR + r"/static/index.html"
+        # html_path = BASE_DIR + r"/static/index.html"
+        html_path = BASE_DIR + r"/static/index_qt.html"
         html = open(html_path, 'r', encoding='UTF-8').read()
         self.browser = QWebEngineView()
         self.browser.setPage(WebEnginePage(self.browser))

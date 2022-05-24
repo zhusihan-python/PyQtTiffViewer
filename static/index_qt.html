@@ -1,0 +1,558 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <script type="text/javascript" src="geo.min.js"></script>
+  <script type="text/javascript" src="jquery-3.6.0.min.js"></script>
+  <script type="text/javascript" src="qwebchannel.js"></script>
+</head>
+<script>
+  var baseEndpoint = 'api/imagefile';
+</script>
+
+<div class="wrapper" style="width: 100%; height: 800px;">
+
+<link rel="stylesheet" type="text/css" href="style/style.css">
+<script>
+  var host = undefined;
+  var thumbnailUrl = undefined;
+  var tileUrl = undefined;
+  var baseApi = 'api';
+
+  const windowSearch = new URLSearchParams(window.location.search);
+  const windowSearchParams = Object.fromEntries(windowSearch.entries());
+
+  function updateTileUrlOption(option, value) {
+    if (thumbnailUrl === undefined) {
+      thumbnailUrl = `${host}/${baseEndpoint}/${imageId}/thumbnail.png`;
+    }
+    const url = new URL(tileUrl);
+    const urlThumb = new URL(thumbnailUrl);
+    console.log("value and option in updateTileUrlOption", value, option);
+    if (value === undefined) {
+      url.searchParams.delete(option);
+      urlThumb.searchParams.delete(option);
+    } else {
+      url.searchParams.set(option, value);
+      urlThumb.searchParams.set(option, value);
+    }
+    const tileFormatEncoded = '/%7Bz%7D/%7Bx%7D/%7By%7D.';
+    const tileFormat = '/{z}/{x}/{y}.';
+    tileUrl = url.toString().replace(tileFormatEncoded, tileFormat);
+    thumbnailUrl = urlThumb.toString();
+    console.log("thumbnailUrl return by base updateTileUrlOption", thumbnailUrl);
+    // insertWindowUrlParam(option, value);
+  }
+
+  function addToggleListener(uiToggle, uiContent, callback = null) {
+    uiToggle.addEventListener('click', function() {
+      this.classList.toggle('active');
+      var state = null;
+      if (uiContent.style.display === 'block') {
+        uiContent.style.display = 'none';
+        state = false;
+      } else {
+        uiContent.style.display = 'block';
+        state = true;
+      }
+      // Call the custom callback if given
+      if (callback != null) {
+        callback(state);
+      }
+    });
+    // Hide by default
+    uiContent.style.display = 'none';
+  }
+</script>
+
+
+<script>
+  var imageId = 1;
+  if (host === undefined) {
+    console.log("protocol:" + window.location.protocol + " host:" + window.location.host);
+    // host = window.location.protocol + "//" + window.location.host;
+    host = "data:" + "//" +   window.location.host;
+  }
+  tileUrl = `${host}/${baseEndpoint}/${imageId}/tiles/{z}/{x}/{y}.png`;
+</script>
+
+
+<div id="imageViewer" style="width: 100%; height: 100%; z-index: 10;"></div>
+
+
+
+<div class="slidecontainer">
+  <button type="button" class="collapsible" id="displayControlsToggle">Toggle Controls</button>
+  <div id="displayControls">
+    <label for="rasterOpacityRange">Raster Layer Opacity: </label>
+    <input type="range" min="1" max="100" value="100" class="overlay" id="rasterOpacityRange" onChange="updateTilesOpacity(event, value)" onInput="updateTilesOpacity(event, value)" style="top: 5px; left: 5px;">
+    <div id='colorsSubGroup' style="display: none;">
+      <label for="colors">Choose a colormap:</label>
+      <select id="colors" onChange='changeColors();'>
+        <option>-- none --</option>
+      </select>
+      <br />
+      <input id="mincolor" type="number" step="0.01" onChange='changeColors();'>
+      <input id="maxcolor" type="number" step="0.01" onChange='changeColors();'>
+    </div>
+    <div>
+      <img id="thumbnail" />
+    </div>
+  </div>
+</div>
+<script>
+  const displayControlsToggle = document.getElementById('displayControlsToggle');
+  const displayControls = document.getElementById('displayControls');
+  addToggleListener(displayControlsToggle, displayControls);
+
+  var colorsSubGroup = document.getElementById('colorsSubGroup');
+  var colorsDropdown = document.getElementById('colors');
+  var bandDropdown = document.getElementById('bandChoice');
+  var colorsMin = document.getElementById('mincolor');
+  var colorsMax = document.getElementById('maxcolor');
+  var thumbnail = document.getElementById('thumbnail');
+  var bands;
+
+  thumbnail.src = thumbnailUrl;
+
+  const containerRef = document.getElementById('imageViewer')
+  var imageLayer;
+  var viewer;
+  var Bridge = null;
+  var metadata = undefined;
+
+  if (windowSearchParams['min']) {
+    colorsMin.value = windowSearchParams['min']
+  }
+  if (windowSearchParams['max']) {
+    colorsMax.value = windowSearchParams['max']
+  }
+
+  window.onload = function () {
+    new QWebChannel(qt.webChannelTransport,
+      function(channel) {
+        Bridge = channel.objects.Bridge;
+
+        // Bridge.get_bands(111, function (pyval) {
+        //   var bands = JSON.parse(pyval);
+        //   for (const [source, values] of Object.entries(bands)) {
+        //     const interp = values['interpretation']
+        //     var newOption = document.createElement('option');
+        //     newOption.value = source;
+        //     newOption.text = interp ? `${source}: ${interp}` : source;
+        //     bandDropdown.appendChild(newOption)
+        //   }
+        //   if (windowSearchParams['band']) {
+        //     bandDropdown.value = windowSearchParams['band'] ? windowSearchParams['band'] : '-- none --';
+        //     colorsSubGroup.style.display = 'block';
+        //   }
+        // });
+
+        Bridge.get_color_maps(function (pyval) {
+          let data = JSON.parse(pyval);
+          if ( data !== undefined ) {
+            for (const [source, values] of Object.entries(data)) {
+              const interp = values['interpretation']
+              var newOption = document.createElement('option');
+              newOption.value = source;
+              newOption.text = interp ? `${source}: ${interp}` : source;
+              colorsDropdown.appendChild(newOption)
+            }
+            if (windowSearchParams['colors']) {
+              colorsDropdown.value = windowSearchParams['colors'] ? windowSearchParams['colors'] : '-- none --';
+              colorsSubGroup.style.display = 'block';
+            }
+          }
+        });
+
+        Bridge.get_metadata(function (pyval) {
+            metadata = JSON.parse(pyval);
+          });
+
+        Bridge.get_thumbnail(function(thumbnail) {
+          // console.log("thumbnail return by get_thumbnail", thumbnail);
+          if (thumbnail) {
+            $('#thumbnail').attr('src', "data:image/png;base64,"+thumbnail);
+          }
+        });
+
+        var griderImageTile = function (spec) {
+          console.log("into griderImageTile", spec);
+          if (!(this instanceof griderImageTile)) {
+            return new griderImageTile(spec);
+          }
+          // var $ = require('jquery');
+          var self = this;
+          this._index = spec.index;
+          this._size = spec.size;
+          this._overlap = spec.overlap || {x: 0, y: 0};
+          this._wrap = spec.wrap || {x: 1, y: 1};
+          this._url = spec.url;
+          this._fetched = false;
+          this._queue = spec.queue || null;
+          geo.imageTile.call(this, spec);
+
+          Object.defineProperty(this, 'index', {
+            get:
+              function () { return this._index; }
+          });
+
+          Object.defineProperty(this, 'size', {
+            get: function () { return this._size; }
+          });
+
+          Object.defineProperty(this, 'overlap', {
+            get: function () { return this._overlap; }
+          });
+
+          Object.defineProperty(this, 'bottom', {
+            get: function () {
+              return this.size.y * (this.index.y + 1) + this.overlap.y;
+            }
+          });
+
+          Object.defineProperty(this, 'top', {
+            get: function () {
+              return this.size.y * this.index.y - (this.index.y ? this.overlap.y : 0);
+            }
+          });
+
+          Object.defineProperty(this, 'left', {
+            get: function () {
+              return this.size.x * this.index.x - (this.index.x ? this.overlap.x : 0);
+            }
+          });
+
+          Object.defineProperty(this, 'right', {
+            get: function () {
+              return this.size.x * (this.index.x + 1) + this.overlap.x;
+            }
+          });
+
+          Object.defineProperty(this, 'image', {
+            get: function () { return this._image; }
+          });
+
+          this.bounds = function (index, shift) {
+            var left, right, bottom, top;
+            left = this.size.x * (this.index.x - index.x) - this.overlap.x - shift.x;
+            right = left + this.size.x + this.overlap.x * 2;
+            top = this.size.y * (this.index.y - index.y) - this.overlap.y - shift.y;
+            bottom = top + this.size.y + this.overlap.y * 2;
+            if (this.overlap.x && this.index.x === index.x) {
+              left += this.overlap.x;
+            }
+            if (this.overlap.y && this.index.y === index.y) {
+              top += this.overlap.y;
+            }
+            return {
+              left: left,
+              right: right,
+              bottom: bottom,
+              top: top
+            };
+          };
+
+          this.fetched = function () {
+            return this._fetched;
+          };
+
+          this.fetch = function () {
+            var defer;
+            console.log("this._image in griderImageTile fetch", this._image, this._fetched)
+            if (!this._image) {
+              console.log("this._image false start new Image");
+              this._image = new Image(this.right - this.left, this.bottom - this.top);
+              // Only set the crossOrigin parameter if this is going across origins.
+              defer = $.Deferred();
+              this._image.onload = defer.resolve;
+              this._image.onerror = defer.reject;
+              // this._image.src = this._url;
+              console.log("this._index griderImageTile call Bridge get_tile", this._index);
+              Bridge.get_tile(this._index.x, this._index.y, this._index.level, function (pyval) {
+                self._image.src = "data:image/png;base64," + pyval;
+                self._url = "data:image/png;base64," + pyval;
+                console.log("self._image.src", self._image.src);
+                defer.resolve();
+              });
+
+              // attach a promise interface to `this`
+              defer.done(function () {
+                this._fetched = true;
+              }.bind(this)).promise(this);
+            }
+            return this;
+          };
+
+          this.then = function (onSuccess, onFailure) {
+            // both fetch and _queueAdd can replace the current then method
+            console.log("griderImageTile then fetched", this.fetched());
+            console.log("griderImageTile then this._queue", this._queue);
+            console.log("griderImageTile then this._queue.add", this._queue.add);
+            console.log("griderImageTile then this.state", !this.state ||
+                this.state());
+            // console.log("griderImageTile then this.state()", this.state());
+            // if (!this.fetched() && this._queue && this._queue.add && (!this.state ||
+            //     this.state() === 'pending')) {
+            //   console.log("griderImageTile then pending call add fetch");
+            //   this._queue.add(this, this.fetch);
+            // } else {
+            //   console.log("griderImageTile not pending call fetch directly");
+            //   this.fetch();
+            // }
+
+            if (!this.fetched()) {
+              this.fetch();
+            }
+            // Call then on the new promise
+            if (this.done && this.fail) {
+              this.done(onSuccess).fail(onFailure);
+            } else {
+              this.then(onSuccess, onFailure);
+            }
+            return this;
+          };
+
+          this.catch = function (method) {
+            this.then(undefined, method);
+            return this;
+          };
+
+          this.toString = function () {
+            return [this._index.level || 0, this._index.y, this._index.x, this._index.reference || 0].join('_');
+          };
+
+        };
+
+        geo.inherit(griderImageTile, geo.tile);
+
+        var griderLayer = function (arg) {
+          if (!(this instanceof griderLayer)) {
+            return new griderLayer(arg);
+          }
+          arg = arg || {};
+          if (arg.mapOpacity !== undefined && arg.opacity === undefined) {
+            arg = $.extend({}, arg);
+            arg.opacity = arg.mapOpacity;
+          }
+
+          geo.tileLayer.call(this, arg);
+          var m_this = this;
+          this.mapOpacity = this.opacity;
+
+          this._getTile = function (index, source) {
+            var urlParams = source || index;
+            console.log("cur index input _getTile", index, urlParams);
+            let cur_tile = griderImageTile({
+              index: index,
+              size: {
+                x: m_this._options.tileWidth,
+                y: m_this._options.tileHeight
+              },
+              queue: m_this._queue,
+              // url: m_this._options.url(source || index),
+              url: m_this._options.url.call(
+                m_this, urlParams.x, urlParams.y, urlParams.level || 0,
+                m_this._options.subdomains),
+              overlap: this._options.tileOverlap,
+              // crossDomain: this._options.crossDomain
+            });
+            console.log("cur_tile in griderLayer", cur_tile);
+            return cur_tile;
+          };
+        };
+
+        griderLayer.newLayerId = (function () {
+          'use strict';
+          var currentId = 1;
+          return function () {
+            var id = currentId;
+            currentId += 1;
+            return id;
+          };
+        }());
+
+        griderLayer.defaults = $.extend({}, geo.tileLayer.defaults, {
+          tileOffset : function (level) {
+            var s = Math.pow(2, level - 1) * 256;
+            return {x: s, y: s};
+          },
+          url: '',
+          source: 'stamen-toner-lite'
+        });
+        geo.inherit(griderLayer, geo.tileLayer);
+        geo.registerLayer('griderLayer', griderLayer, [geo.quadFeature.capabilities.image]);
+
+        Bridge.get_metadata(function (pyval) {
+          console.log("into get_metadata", pyval);
+          var tileinfo = JSON.parse(pyval);
+          console.log("into get_metadata tileinfo: ", tileinfo['geospatial']);
+          if (tileinfo['geospatial']) {
+            updateTileUrlOption('projection', 'EPSG:3857');
+
+            // Initialize the map
+            viewer = geo.map({
+              node: '#imageViewer',
+              clampBoundsX: true
+            })
+            var basemapLayer = viewer.createLayer('osm', {
+              source: 'osm',
+              gcs: 'EPSG:3857' // web mercator
+            });
+
+            function setBounds(extent, setMax = false) {
+              console.log("into setBounds");
+              if (extent != undefined && extent.xmin != undefined) {
+                let xc = (extent.xmax - extent.xmin) * 0.2
+                let yc = (extent.ymax - extent.ymin) * 0.2
+                if (xc === 0) {
+                  xc = 0.01
+                }
+                if (yc === 0) {
+                  yc = 0.01
+                }
+                var bounds = {
+                  left: Math.max(extent.xmin - xc, -180.0),
+                  right: Math.min(extent.xmax + xc, 180.0),
+                  top: Math.min(extent.ymax + yc, 89.9999),
+                  bottom: Math.max(extent.ymin - yc, -89.9999)
+                }
+                viewer.bounds(bounds);
+                if (setMax) {
+                  viewer.maxBounds(bounds)
+                } else {
+                  viewer.zoom(viewer.zoom() - 0.25);
+                }
+              }
+            }
+            setBounds(tileinfo.bounds);
+
+            // Tile layer for showing rasters/images with large_image
+            imageLayer = viewer.createLayer('osm', {
+              keepLower: false,
+              attribution: '',
+              autoshareRenderer: false,
+            });
+
+            console.log("imageLayer in get_metadata if", imageLayer);
+
+            const dataset_bb = tileinfo.bounds;
+            imageLayer.isValid = (index) => {
+              const tileBounds = imageLayer.gcsTileBounds(index);
+              return tileBounds.left <= dataset_bb.xmax &&
+                tileBounds.right >= dataset_bb.xmin &&
+                tileBounds.top >= dataset_bb.ymin &&
+                tileBounds.bottom <= dataset_bb.ymax;
+            }
+            imageLayer.idleAfter = 'all';
+
+            // Increase zoom range from default of 16
+            viewer.zoomRange({
+              min: 0,
+              max: 20,
+            })
+          } else {
+            console.log("into get_metadata else tileinfo", tileinfo);
+            const params = geo.util.pixelCoordinateParams(
+              '#imageViewer', tileinfo.sizeX, tileinfo.sizeY, tileinfo.tileWidth, tileinfo.tileHeight);
+            var params_str = JSON.stringify(params);
+            console.log("params_str in django_large_image geojs else", params_str);
+            console.log("tileUrl before settibf params layer", tileUrl);
+            // params.layer.url = tileUrl;
+            params.layer.url = "";
+
+            viewer = geo.map(params.map);
+
+            viewer.zoomRange({
+              // do not set a min limit so that bounds clamping determines min
+              min: -Infinity,
+              max: 12,
+            });
+
+            // params.layer.keepLower = false;
+            console.log("params.layer in metadata else", params.layer);
+            var layer_str = JSON.stringify(params.layer);
+            console.log("params.layer_str in metadata else", layer_str);
+            console.log("get_metadata else viewer", viewer);
+            try {
+              imageLayer = viewer.createLayer('griderLayer', params.layer);
+              // imageLayer = viewer.createLayer('osm', params.layer);
+            }
+            catch (err) {
+              console.log("createLayer get err", err)
+            }
+            // imageLayer._getTile = newGetTileFunction;
+            console.log("imageLayer in get_metadata else", imageLayer);
+          }
+          // Change default interactor options
+          const interactorOpts = viewer.interactor().options();
+          interactorOpts.zoomAnimation = {
+            enabled: true,
+          };
+          interactorOpts.momentum = {
+            enabled: true,
+          };
+          viewer.interactor().options(interactorOpts);
+
+
+          var ui = viewer.createLayer('ui');
+          // Create a zoom slider widget
+          ui.createWidget('slider', {
+            position: {
+              left: 40,
+              top: 40
+            }
+          });
+          // bandChange();
+        });
+
+      });
+  }
+
+  function changeColors() {
+    colorsSubGroup.display = 'block';
+    var cmap;
+    if (colorsDropdown.value == '-- none --') {
+      cmap = undefined;
+    } else {
+      cmap = colorsDropdown.value;
+    }
+    updateTileUrlOption('palette', cmap);
+    updateTileUrlOption('min', colorsMin.value);
+    updateTileUrlOption('max', colorsMax.value);
+    updateTileLayer();
+    thumbnail.src = thumbnailUrl;
+  }
+
+  function _callback(x, y, z) {
+      return "http://127.0.0.1:9000/api/imagefile/1/tiles/"+z+"/" + x + "/" + y + ".png";
+  }
+
+  function get_url(x, y, z, cb){
+      let url = cb(x, y, z);
+      console.log("url in django_large_image geojs", url);
+      return url;
+  }
+
+
+  function updateTileLayer() {
+    console.log('tileUrl in django_large_image geojs updateTileLayer', tileUrl);
+    tileUrl = function (x, y, z, subdomains) {
+      console.log("input x,y,z,subdomains in django_large_image geojs updateTileLayer", x, y, z, subdomains);
+
+      let res = get_url(x, y, z, _callback);
+      console.log("res in django_large_image geojs updateTileLayer", res);
+      return res;
+    };
+    imageLayer.url(tileUrl);
+
+  }
+
+  function updateTilesOpacity(e, value) {
+    value = Number(value) / 100.0;
+    imageLayer.opacity(value);
+  }
+</script>
+
+
+</div>
